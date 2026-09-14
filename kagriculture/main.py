@@ -1,4 +1,3 @@
-%%writefile main.py
 printed = False
 
 def probe_agent(obs):
