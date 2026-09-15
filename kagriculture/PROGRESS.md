@@ -10,39 +10,57 @@
 
 ### 0.1 — Environment Startup
 - [x] Kaggriculture environment installs and runs
-- **Date completed**: ___
+- **Date completed**: Prior (confirmed 2026-09-15)
 
 ### 0.2 — Observation Inspection
 - [x] Confirmed observation structure (player, farms, private, market, town, day, hour)
-- **Date completed**: ___
+- [x] Starting capital: **$3,000** (not $2,000 as old notebook showed)
+- [x] Farmer starts at **(4, 4)**
+- [x] Tiles are 10×10 grid: `None` = empty, `"LOCKED"` = locked quadrant
+- [x] NW quadrant (rows 0–4, cols 0–4) unlocked initially = 25 tiles
+- [x] Seeds all start at 0 (must buy)
+- [x] Shed tracks: WHEAT, CARROT, TOMATO, STRAWBERRY, MELON, MILK, WOOL, EGG, FERTILIZER, COW, SHEEP, GOOSE
+- [x] Animals in shed: COW, SHEEP, GOOSE
+- [x] Market goods: WHEAT(25), CARROT(35), TOMATO(60), STRAWBERRY(120), MELON(250), EGG(50), MILK(160), WOOL(200), FERTILIZER(100)
+- **Date completed**: Prior (confirmed 2026-09-15)
 
 ### 0.3 — PASS/PASS Experiment
-- [x] Ran PASS/PASS experiment
-- [x] Confirmed market changes autonomously
-- [x] Confirmed money stays unchanged with PASS
-- **Date completed**: ___
+- [x] Ran PASS/PASS experiment (48 steps, seed=42)
+- [x] Confirmed market changes autonomously (WHEAT: 10000 → 9998 in 47 steps)
+- [x] Confirmed money stays unchanged with PASS ($3,000 → $3,000)
+- [x] Confirmed 2 observations per step (one per player)
+- **Date completed**: Prior (confirmed 2026-09-15)
 
 ### 0.4 — Clock Analysis
-- [ ] Ran clock experiment (96 steps)
-- [ ] Verified `day = step // 24`
-- [ ] Verified `hour = step % 24`
-- **Findings**: ___
-- **Date completed**: ___
+- [x] Ran clock experiment (47 unique steps)
+- [x] Verified `day = step // 24` ✅ CONFIRMED
+- [x] Verified `hour = step % 24` ✅ CONFIRMED
+- **Findings**: Clock formula is exact: `day = step // 24`, `hour = step % 24`
+- **Date completed**: 2026-09-15
 
 ### 0.5 — Autonomous Market Behavior
-- [ ] Ran full 720-step PASS/PASS game
-- [ ] Recorded market inventory over time
-- [ ] Recorded market prices over time
-- [ ] Determined autonomous consumption rate
-- [ ] Determined consumption timing (every step? every hour? every day?)
-- [ ] Determined price-inventory relationship
-- [ ] Plotted inventory and price charts
+- [x] Ran full 720-step PASS/PASS game (seed=42)
+- [x] Recorded market inventory over time
+- [x] Recorded market prices over time
+- [x] Determined autonomous consumption rate
+- [x] Determined consumption timing
+- [x] Determined price-inventory relationship
+- [x] Analyzed town shop impact on consumption
 - **Findings**:
-  - Consumption rate: ___
-  - Consumption timing: ___
-  - Price formula: ___
-  - Goods consumed: ___
-- **Date completed**: ___
+  - **Consumption timing**: Every 4 hours at hours **1, 5, 9, 13, 17, 21** (6 ticks/day). MELON and EGG only at hour 1 (1 tick/day).
+  - **Base consumption**: 1/day for all goods (days 1–3, before any shops open)
+  - **FERTILIZER**: Never consumed autonomously
+  - **Shops open every 3 days** at hour 0: Day 3, 6, 9, 12, 15, 18, 21, 24
+  - **Shop schedule**: FARMERS_MARKET(d3) → PET_CAFE(d6) → YARN_STORE(d9) → YARN_STORE(d12) → PET_CAFE(d15) → PET_CAFE(d18) → FARMERS_MARKET(d21) → ICE_CREAM_SHOP(d24)
+  - **Shops increase consumption** of specific goods:
+    - FARMERS_MARKET: +6/day WHEAT, CARROT, TOMATO, STRAWBERRY
+    - PET_CAFE: +6/day CARROT, MILK; +12/day CARROT (from 2nd/3rd PET_CAFE)
+    - YARN_STORE: +12/day WOOL
+    - ICE_CREAM_SHOP: +6/day MILK, STRAWBERRY
+  - **CARROT is most consumed** (858 total, up to 49/day by end) — highest demand
+  - **Price-per-unit-consumed**: MILK(1.08), MELON(1.00), STRAWBERRY(0.50), CARROT(0.35) — MILK and MELON prices are most sensitive
+  - **Final prices**: CARROT 332 (+297!), STRAWBERRY 261, MELON 280, MILK 231, WOOL 253, TOMATO 100, EGG 52, WHEAT 42
+- **Date completed**: 2026-09-15
 
 ### 0.6 — Action Mechanics Discovery
 - [ ] 0.6a — MOVE: tested, preconditions/effects recorded
