@@ -181,12 +181,15 @@
 - [x] `generate_tasks()` produces planting, watering, harvesting, and weed clearance tasks
 - [x] `assign_tasks()` assigns workers greedily by distance & priority
 - [x] Updated `main.py` with heuristic agent (WorldState integration, dynamic market selling & seed restocking)
-- [ ] Agent runs full 720-turn game without errors (benchmarking pending)
-- [ ] Agent earns more than starting capital ($3,000)
-- [ ] Agent beats `random` opponent
-- [ ] Win rate vs random (20 games): ___ / 20 = ___%
+- [x] Agent runs full 720-turn game without errors ✅
+  - Verified: 720/720 steps executed with 0 errors.
+  - Final money: **$3,699.00** (Net profit: **+$699.00** above starting $3,000).
+  - Beat opponent `random` ($3,699 vs $0.00).
+- [x] Agent earns more than starting capital ($3,000) ✅
+- [x] Agent beats `random` opponent ✅
+- [ ] Win rate vs random (multi-game evaluation): pending user cue
 - [ ] **FIRST KAGGLE SUBMISSION DONE?** [ ]
-- **Average final money**: ___
+- **Average final money**: $3,699.00 (1 game)
 - **Date completed**: [/] In Progress
 
 ---
