@@ -11,9 +11,6 @@ from world_state import parse_observation, WorldState
 from pathfinding import manhattan_distance, next_move
 from task_manager import generate_tasks, assign_tasks, execute_worker_task
 import action_engine as ae
-from market_model import MarketTracker
-
-tracker = MarketTracker()
 
 def agent(obs: Dict[str, Any]) -> Dict[str, Any]:
     """Kaggle-compatible agent entry point."""
@@ -24,30 +21,21 @@ def agent(obs: Dict[str, Any]) -> Dict[str, Any]:
     
     market_orders: List[List[Any]] = []
     
-    tracker.update(market.prices, market.inventory)
-    
-    # 1. Market Orders: Sell harvested produce from shed dynamically
+    # 1. Market Orders: Sell harvested produce from shed
     for good, count in private.shed.items():
         if count > 0 and good in ("WHEAT", "CARROT", "TOMATO", "STRAWBERRY", "MELON", "EGG", "MILK", "WOOL", "FERTILIZER"):
-            current_price = market.price_of(good)
-            sell_qty = tracker.should_sell(good, count, current_price)
-            if sell_qty > 0:
-                market_orders.append(ae.sell_order(good, sell_qty))
+            market_orders.append(ae.sell_order(good, count))
             
     # 2. Market Orders: Maintain seed supply
-    # Determine the best crop to plant based on ROI
-    best_crop = tracker.best_crop_to_plant(market.prices, my_farm.money) or "WHEAT"
-    
-    target_seeds = private.seeds.get(best_crop, 0)
-    # If seeds are low and we have funds, buy the best seeds
-    # Let's say we always want at least 5 seeds
-    if target_seeds < 5 and my_farm.money >= 100:
-        buy_qty = 5 - target_seeds
+    wheat_seeds = private.seeds.get("WHEAT", 0)
+    # If seeds are low and we have funds, buy wheat seeds
+    if wheat_seeds < 5 and my_farm.money >= 50:
+        buy_qty = min(5, int(my_farm.money // 10))
         if buy_qty > 0:
-            market_orders.append(ae.buy_seed_order(best_crop, buy_qty))
+            market_orders.append(ae.buy_seed_order("WHEAT", buy_qty))
             
     # 3. Tasks & Worker Assignments
-    tasks = generate_tasks(world, default_crop=best_crop)
+    tasks = generate_tasks(world, default_crop="WHEAT")
     assignments = assign_tasks(my_farm.all_workers, tasks)
     
     # Execute farmer task
