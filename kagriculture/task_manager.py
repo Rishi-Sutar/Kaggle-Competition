@@ -10,8 +10,13 @@ from pathfinding import manhattan_distance, next_move
 import action_engine as ae
 
 TASK_PRIORITIES = {
+    "FEED": 11,      # Crucial for animal survival and production
     "WATER": 10,     # Prevent weeds & boost yield
     "HARVEST": 9,    # Harvest mature crops before decay
+    "HARVEST_ANIMAL": 9, # Harvest animal products
+    "CARE": 8,       # Care for animals
+    "PLACE_ANIMAL": 7, # Place animals in structures
+    "BUILD_STRUCTURE": 6, # Build pastures and coops
     "PLANT": 5,      # Keep farm occupied
     "DIG": 2,        # Clear weeds
     "IDLE": 0,
@@ -79,6 +84,84 @@ def generate_tasks(world: WorldState, default_crop: str = "WHEAT") -> List[Task]
             priority=TASK_PRIORITIES["DIG"]
         ))
         
+    # 5. Animal tasks: FEED, HARVEST_ANIMAL, CARE
+    # Assumes WHEAT is used for feed. We check private.shed.
+    wheat_in_shed = world.private.shed.get("WHEAT", 0)
+    for tile in farm.structure_tiles:
+        if tile.ready_to_harvest:
+            tasks.append(Task(
+                task_type="HARVEST_ANIMAL",
+                target_pos=tile.pos,
+                priority=TASK_PRIORITIES["HARVEST_ANIMAL"]
+            ))
+        if tile.needs_feed and wheat_in_shed > 0:
+            tasks.append(Task(
+                task_type="FEED",
+                target_pos=tile.pos,
+                priority=TASK_PRIORITIES["FEED"]
+            ))
+            wheat_in_shed -= 1 # Prevent over-queueing if we lack wheat
+            
+    # 6. PLACE_ANIMAL tasks for empty structures
+    unplaced_animals = []
+    for animal in ["GOOSE", "COW", "SHEEP"]:
+        for _ in range(world.private.shed.get(animal, 0)):
+            unplaced_animals.append(animal)
+            
+    for tile in farm.empty_structures:
+        if not unplaced_animals:
+            break
+            
+        animal_to_place = None
+        for a in unplaced_animals:
+            if tile.structure_kind == "COOP" and a == "GOOSE":
+                animal_to_place = a
+                break
+            elif tile.structure_kind == "PASTURE" and a in ("COW", "SHEEP"):
+                animal_to_place = a
+                break
+                
+        if animal_to_place:
+            unplaced_animals.remove(animal_to_place)
+            tasks.append(Task(
+                task_type="PLACE_ANIMAL",
+                target_pos=tile.pos,
+                priority=TASK_PRIORITIES["PLACE_ANIMAL"],
+                crop=animal_to_place # We reuse crop field for item
+            ))
+            
+    # 7. BUILD_STRUCTURE tasks if we still have unplaced animals
+    coops_needed = unplaced_animals.count("GOOSE")
+    pastures_needed = sum(1 for a in unplaced_animals if a in ("COW", "SHEEP"))
+    
+    # We use empty tiles that are furthest from the shed (4, 4) for structures
+    # so crops stay closer to the shed
+    if coops_needed > 0 or pastures_needed > 0:
+        sorted_empty_rev = sorted(
+            farm.empty_tiles,
+            key=lambda t: manhattan_distance(t.pos, (4, 4)),
+            reverse=True
+        )
+        for tile in sorted_empty_rev:
+            if coops_needed > 0:
+                tasks.append(Task(
+                    task_type="BUILD_STRUCTURE",
+                    target_pos=tile.pos,
+                    priority=TASK_PRIORITIES["BUILD_STRUCTURE"],
+                    crop="COOP"
+                ))
+                coops_needed -= 1
+            elif pastures_needed > 0:
+                tasks.append(Task(
+                    task_type="BUILD_STRUCTURE",
+                    target_pos=tile.pos,
+                    priority=TASK_PRIORITIES["BUILD_STRUCTURE"],
+                    crop="PASTURE"
+                ))
+                pastures_needed -= 1
+            else:
+                break
+                
     return tasks
 
 
@@ -146,6 +229,22 @@ def execute_worker_task(worker: WorkerState, task: Optional[Task], world: WorldS
             return ae.water_action()
         elif task.task_type == "HARVEST":
             return ae.harvest_action()
+        elif task.task_type == "HARVEST_ANIMAL":
+            return ae.harvest_action()
+        elif task.task_type == "FEED":
+            return ae.feed_action()
+        elif task.task_type == "CARE":
+            return ae.care_action()
+        elif task.task_type == "PLACE_ANIMAL":
+            animal = task.crop
+            if animal:
+                return ae.place_action(animal, 1)
+        elif task.task_type == "BUILD_STRUCTURE":
+            struct_type = task.crop
+            if struct_type == "COOP":
+                return ae.build_coop_action()
+            elif struct_type == "PASTURE":
+                return ae.build_pasture_action()
         elif task.task_type == "PLANT":
             crop = task.crop or "WHEAT"
             return ae.plant_action(crop)
