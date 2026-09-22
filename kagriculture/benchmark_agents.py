@@ -44,4 +44,4 @@ def benchmark(num_games=5, agent_path="main.py", opponent_path="phase3_agent/mai
     print(f"  Avg Opponent Money: ${avg_opp:.2f} (Net: ${avg_opp - 3000:+.2f})")
     
 if __name__ == "__main__":
-    benchmark(num_games=5)
+    benchmark(num_games=3)

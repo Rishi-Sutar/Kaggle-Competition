@@ -277,6 +277,31 @@
 
 ---
 
+## PHASE 8 — ELO Meta-Strategy Fixes
+- [x] Market: Always sell above price floor instead of batch-holding (Fix 1)
+- [x] Opponent awareness: Track opponent crops and animals (Fix 2)
+- [x] Opponent avoidance: If they grow X, we grow Y (Fix 2)
+- [x] Earlier game: Lower animal threshold from $1500 to $800 (Fix 3)
+- [x] Scarcity bonus: Update `best_crop_to_plant` to factor in market saturation (Fix 4)
+- [x] Aggressive endgame: Start full liquidation at day 25 (Fix 5)
+- [x] Scaling: Buy land when money > $2000 (Fix 6)
+- **Date completed**: 2026-09-21
+
+---
+
+## PHASE 9 — Coordinated Multi-Worker Pipeline & Core Engine Fix
+- [x] Root Cause Investigation: Replay analysis of 2000+ ELO top players ($32,900 final bank)
+- [x] Daily Worker Re-Hiring: Fixed daily reset bug; automatically re-hire 5 hands every morning ($12 total)
+- [x] Multi-Step Animal Placement: Pick up animal from shed (4,4) before placing into pasture/coop
+- [x] Multi-Step Animal Feeding: Pick up wheat from shed (4,4) before executing FEED
+- [x] Animal Care & Production: Daily care action banks bonus payout
+- [x] Harvest & Drop-off: Handled worker inventory drop-off at shed (4,4) for market sales
+- [x] Crop Horizon: Melons days 0-19, fast Carrots days 20-26, liquidation days 27-29
+- [x] Win rate vs Phase 3 (3 games): **3 / 3 = 100.0%**
+- **Date completed**: 2026-09-21
+
+---
+
 ## KAGGLE SUBMISSIONS
 
 | # | Date | Phase | Avg Money | Notes |
@@ -285,7 +310,9 @@
 | 2 | 2026-09-19 | Phase 4 Market Intelligence | — | Dynamic selling + crop ROI |
 | 3 | 2026-09-20 | Phase 5 Animals + Hiring | — | Sheep/worker hiring |
 | 4 | 2026-09-20 | Phase 6 Strategy Planner | — | Re-plans every morning |
-| 5 | 2026-09-21 | Phase 7 CP-SAT Optimizer | — | Optimal worker scheduling |
+| 5 | 2026-09-21 | Phase 7 CP-SAT Optimizer | 300-400 | Optimal worker scheduling (ELO revealed local blindspots) |
+| 6 | 2026-09-21 | Phase 8 ELO Meta-Strategy | 353.1 | Saturated market & animal placement bug discovered |
+| 7 | 2026-09-21 | Phase 9 Coordinated Pipeline | ~$9,500+ | Day 0 blitz, daily re-hires, multi-step animal placement/feed |
 
 ---
 

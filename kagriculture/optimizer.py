@@ -1,16 +1,14 @@
 """
-Optimizer for Kaggriculture — Phase 7.
+Optimizer for Kaggriculture — Phase 9.
 Uses OR-Tools CP-SAT to optimally assign workers to tasks,
-minimizing total travel distance and maximizing task coverage.
+accounting for effective multi-step travel distance (shed pickups) and pinned tasks.
 
-Falls back to greedy assignment if OR-Tools is unavailable or times out.
+Falls back to assign_tasks if OR-Tools is unavailable or times out.
 """
-from typing import Dict, List, Optional, Tuple
-from task_manager import Task
+from typing import Dict, List, Optional
+from task_manager import Task, effective_distance, assign_tasks
 from world_state import WorkerState
-from pathfinding import manhattan_distance
 
-# Try importing OR-Tools; fall back gracefully if not available
 try:
     from ortools.sat.python import cp_model
     ORTOOLS_AVAILABLE = True
@@ -18,31 +16,17 @@ except ImportError:
     ORTOOLS_AVAILABLE = False
 
 
-def _greedy_assign(
-    workers: List[WorkerState],
-    tasks: List[Task]
-) -> Dict[int, Optional[Task]]:
-    """Greedy fallback assignment."""
-    from task_manager import assign_tasks
-    return assign_tasks(workers, tasks)
-
-
 def optimize_assignments(
     workers: List[WorkerState],
     tasks: List[Task],
-    time_limit_ms: int = 500
+    time_limit_ms: int = 400
 ) -> Dict[int, Optional[Task]]:
     """
     Assign tasks to workers using OR-Tools CP-SAT.
-    Maximizes weighted priority coverage while minimizing total travel distance.
-
-    Falls back to greedy assignment if:
-      - OR-Tools is not installed
-      - Problem is trivially small (< 2 workers or < 2 tasks)
-      - Solver times out without a feasible solution
+    Maximizes weighted priority coverage while minimizing effective travel distance.
     """
     if not ORTOOLS_AVAILABLE or len(workers) < 2 or len(tasks) < 2:
-        return _greedy_assign(workers, tasks)
+        return assign_tasks(workers, tasks)
 
     model = cp_model.CpModel()
     W = len(workers)
@@ -59,27 +43,30 @@ def optimize_assignments(
     for w in range(W):
         model.Add(sum(x[w][t] for t in range(T)) <= 1)
 
-    # Objective: maximize sum of (priority * 100 - distance) for all assigned pairs
-    MAX_DIST = 20  # Max possible manhattan distance on a 10x10 grid
+    # Constraint: pinned tasks (e.g. DROP_OFF pinned to a specific worker)
+    for t, task in enumerate(tasks):
+        if task.worker_id is not None:
+            for w, worker in enumerate(workers):
+                if worker.worker_id != task.worker_id:
+                    model.Add(x[w][t] == 0)
+
+    # Objective: maximize sum of (priority * 20 - effective_distance)
+    MAX_DIST = 25
     objective_terms = []
     for w, worker in enumerate(workers):
         for t, task in enumerate(tasks):
-            dist = manhattan_distance(worker.pos, task.target_pos)
-            # Scale priority up so it dominates the distance penalty
+            dist = effective_distance(worker, task)
             weight = (task.priority * MAX_DIST) - dist
-            # Shift to ensure positive weights (CP-SAT requires non-negative for maximize)
-            weight_shifted = weight + (MAX_DIST * 15)  # offset so always positive
+            weight_shifted = weight + (MAX_DIST * 20)  # offset to ensure non-negative
             objective_terms.append(weight_shifted * x[w][t])
 
     model.Maximize(sum(objective_terms))
 
-    # Solve with time limit
     solver = cp_model.CpSolver()
     solver.parameters.max_time_in_seconds = time_limit_ms / 1000.0
     solver.parameters.log_search_progress = False
     status = solver.Solve(model)
 
-    # Build result
     assignments: Dict[int, Optional[Task]] = {w.worker_id: None for w in workers}
 
     if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
@@ -89,7 +76,6 @@ def optimize_assignments(
                     assignments[worker.worker_id] = task
                     break
     else:
-        # Fallback if solver couldn't find feasible solution in time
-        return _greedy_assign(workers, tasks)
+        return assign_tasks(workers, tasks)
 
     return assignments

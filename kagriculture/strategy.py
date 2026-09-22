@@ -62,7 +62,7 @@ CANDIDATE_STRATEGIES = [
         buy_animals=True,
         hire_workers=True,
         sell_aggressively=False,
-        min_money_to_act=1500,
+        min_money_to_act=800,
         description="Prioritize animal investment; grow wheat just for feed"
     ),
     Strategy(

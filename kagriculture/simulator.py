@@ -60,7 +60,7 @@ def simulate_strategy(
     
     # --- Estimate animal income per day ---
     animal_daily_income = 0.0
-    if strategy.buy_animals and money >= 1500 and wheat_reserve >= 5:
+    if strategy.buy_animals and money >= 800 and wheat_reserve >= 5:
         # Buy a sheep if we can afford it
         sheep_info = ANIMAL_TYPES["SHEEP"]
         if money >= sheep_info.cost:
@@ -130,8 +130,8 @@ def best_strategy(
     """
     from strategy import CANDIDATE_STRATEGIES
     
-    # Always switch to ENDGAME_LIQUIDATE in final 2 days
-    if current_day >= 28:
+    # Always switch to ENDGAME_LIQUIDATE in final 5 days
+    if current_day >= 25:
         endgame = next((s for s in CANDIDATE_STRATEGIES if s.name == "ENDGAME_LIQUIDATE"), None)
         if endgame:
             return endgame

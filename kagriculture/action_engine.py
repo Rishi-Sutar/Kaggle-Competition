@@ -37,6 +37,8 @@ def build_pasture_action() -> List[str]:
     return ["BUILD_PASTURE"]
 
 def place_action(item: str, n: int = 1) -> List[Any]:
+    if n == 1:
+        return ["PLACE", item]
     return ["PLACE", item, n]
 
 def feed_action() -> List[str]:

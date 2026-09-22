@@ -44,45 +44,43 @@ class MarketTracker:
 
     def should_sell(self, item: str, amount_held: int, current_price: int) -> int:
         """
-        Determines how many units to sell this turn.
-        Avoids crashing the market if we hold a large quantity.
+        Simple sell rule: sell everything if price is above floor ($5).
+        Against competition agents, market prices rarely recover — holding is costly.
         """
         if amount_held == 0:
             return 0
-            
-        trend = self.get_price_trend(item, window=10)
-        
-        # If price is at or near the floor ($1), HODL unless we need money
+        # At the price floor, hold and let the market recover naturally
         if current_price <= 5:
-            # We could sell 1 to see if we can push it up, or just hold
             return 0
-            
-        # If price is rapidly dropping, panic sell a larger chunk!
-        if trend < -2.0:
-            return min(amount_held, 5)
-            
-        # If price is rising, hold or sell slowly
-        if trend > 0.5:
-            return 1
-            
-        # Steady market: sell in moderate batches
-        return min(amount_held, 3)
+        # Otherwise sell all of it — never hold against a competing agent
+        return amount_held
 
-    def best_crop_to_plant(self, current_prices: Dict[str, int], money: float) -> Optional[str]:
+    def best_crop_to_plant(self, current_prices: Dict[str, int], money: float, market_inventory: Dict[str, int] = None) -> Optional[str]:
         """
-        Calculates the best crop to plant based on current market profitability.
+        Calculates the best crop to plant based on current market ROI and scarcity.
+        Prefers crops with low market inventory (less flooded = better price sustainability).
         """
         best_crop = None
-        best_roi = -999.0
+        best_score = -999.0
         
         for crop_name, info in CROP_TYPES.items():
-            # Only consider crops we can afford the seeds for
             if money >= info.seed_cost:
                 price = current_prices.get(crop_name, info.base_sell_price)
                 roi = crop_profitability(crop_name, price)
                 
-                if roi > best_roi:
-                    best_roi = roi
+                # Scarcity bonus: prefer crops with low market inventory
+                scarcity_bonus = 0.0
+                if market_inventory:
+                    inv = market_inventory.get(crop_name, 10000)
+                    # Penalize saturated crops (high inventory = low future price)
+                    if inv > 5000:
+                        scarcity_bonus = -0.5  # heavily penalize saturated market
+                    elif inv < 1000:
+                        scarcity_bonus = 0.3   # bonus for scarce crops
+                
+                score = roi + scarcity_bonus
+                if score > best_score:
+                    best_score = score
                     best_crop = crop_name
                     
         return best_crop
