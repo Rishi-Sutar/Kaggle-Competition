@@ -1,13 +1,13 @@
 """
 Simulator Module for Kaggriculture.
 Projects future money for each candidate strategy and ranks them.
-This is a lightweight, fast heuristic simulation — not a full game replay.
+Uses MarketTracker for predictive pricing.
 """
 from typing import Dict, List, Optional
 from strategy import Strategy, CANDIDATE_STRATEGIES
 from crop_model import CROP_TYPES, crop_profitability
 from animal_model import ANIMAL_TYPES
-
+from market_model import MarketTracker
 
 TOTAL_GAME_DAYS = 30
 TURNS_PER_DAY = 24
@@ -19,7 +19,7 @@ def simulate_strategy(
     current_money: float,
     num_empty_tiles: int,
     num_animals: int,
-    market_prices: Dict[str, int],
+    tracker: MarketTracker,
     wheat_in_shed: int,
 ) -> float:
     """
@@ -49,8 +49,9 @@ def simulate_strategy(
     if focus and farmable_tiles > 0:
         crop_info = CROP_TYPES.get(focus)
         if crop_info and money >= crop_info.seed_cost:
-            price = market_prices.get(focus, crop_info.base_sell_price)
-            roi_per_turn = crop_profitability(focus, price)
+            # Predict price at maturity using MarketTracker
+            predicted_price = tracker.predict_price_at_maturity(focus)
+            roi_per_turn = crop_profitability(focus, predicted_price)
             # Approximate daily income: ROI * 24 turns * tiles we can plant
             tiles_planted = min(farmable_tiles, max(1, int(money // crop_info.seed_cost)))
             cost_this_day = tiles_planted * crop_info.seed_cost
@@ -60,26 +61,36 @@ def simulate_strategy(
     
     # --- Estimate animal income per day ---
     animal_daily_income = 0.0
-    if strategy.buy_animals and money >= 800 and wheat_reserve >= 5:
-        # Buy a sheep if we can afford it
-        sheep_info = ANIMAL_TYPES["SHEEP"]
-        if money >= sheep_info.cost:
-            money -= sheep_info.cost
-            animals += 1
     
-    for _ in range(animals):
-        # SHEEP: $200 WOOL every 3 days = ~$67/day (simplified)
-        sheep_price = market_prices.get("WOOL", 200)
-        animal_daily_income += sheep_price / 3.0
+    # Simple compounding simulation for animals:
+    # If strategy buys animals, assume we spend all excess money > $800 on SHEEP/COW.
+    simulated_days = days_remaining
+    simulated_money = money
+    simulated_animals = animals
+    
+    # Sheep info
+    sheep_info = ANIMAL_TYPES["SHEEP"]
+    sheep_price = tracker.price_history.get("WOOL", [200])[-1] # fallback to current price
+    sheep_daily_income = sheep_price / 3.0
+    
+    # Wheat cost
+    wheat_price = tracker.price_history.get("WHEAT", [25])[-1]
+    
+    for day in range(simulated_days):
+        # Income for this day
+        daily_income = crop_daily_income + (simulated_animals * sheep_daily_income)
+        daily_cost = simulated_animals * wheat_price
         
-    # --- Daily feed cost for animals ---
-    daily_feed_cost = animals * market_prices.get("WHEAT", 25)
+        simulated_money += (daily_income - daily_cost)
+        
+        # Reinvest in animals if strategy allows
+        if strategy.buy_animals and simulated_money >= sheep_info.cost + 500: # Keep 500 buffer
+            # How many can we buy?
+            buy_count = int((simulated_money - 500) // sheep_info.cost)
+            simulated_animals += buy_count
+            simulated_money -= buy_count * sheep_info.cost
 
-    # --- Project income over remaining days ---
-    net_daily = crop_daily_income + animal_daily_income - daily_feed_cost
-    projected_money = money + (net_daily * days_remaining)
-    
-    return projected_money
+    return simulated_money
 
 
 def rank_strategies(
@@ -87,7 +98,7 @@ def rank_strategies(
     current_money: float,
     num_empty_tiles: int,
     num_animals: int,
-    market_prices: Dict[str, int],
+    tracker: MarketTracker,
     wheat_in_shed: int,
 ) -> List[Strategy]:
     """
@@ -106,7 +117,7 @@ def rank_strategies(
             current_money=current_money,
             num_empty_tiles=num_empty_tiles,
             num_animals=num_animals,
-            market_prices=market_prices,
+            tracker=tracker,
             wheat_in_shed=wheat_in_shed,
         )
         scored.append((projected, strategy))
@@ -121,7 +132,7 @@ def best_strategy(
     current_money: float,
     num_empty_tiles: int,
     num_animals: int,
-    market_prices: Dict[str, int],
+    tracker: MarketTracker,
     wheat_in_shed: int,
 ) -> Strategy:
     """
@@ -141,7 +152,7 @@ def best_strategy(
         current_money=current_money,
         num_empty_tiles=num_empty_tiles,
         num_animals=num_animals,
-        market_prices=market_prices,
+        tracker=tracker,
         wheat_in_shed=wheat_in_shed,
     )
     

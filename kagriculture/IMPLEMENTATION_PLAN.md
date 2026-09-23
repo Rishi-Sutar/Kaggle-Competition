@@ -1692,3 +1692,23 @@ ONLY add OR-Tools if:
 5. **Compare against the previous phase** before declaring the new phase done.
 6. **Keep `main.py` clean.** No experiment code. No print statements (except debug mode).
 7. **The notebook is for experiments.** The `.py` files are for production code.
+
+
+---
+
+# PHASE 10 — Predictive Dynamic Strategy (Score 2000+ Target)
+
+## Goal
+Transition the agent from static heuristics (Phase 9) to a fully dynamic, simulation-based strategy that predicts market prices, monitors the opponent, and reinvests capital aggressively into high-yield assets.
+
+### Steps
+1. **Enhance market_model.py**: Implement opponent tracking and predict_price_at_maturity().
+2. **Enhance simulator.py**: Use predictive prices and include reinvestment compounding in simulations.
+3. **Update main.py**: Remove static Day 0 Blitz. Implement daily Hour 0 strategy re-evaluation. Scale animals and land dynamically based on strategy.
+4. **Dynamic Endgame**: Liquidate based on strategy (sell out on final days).
+
+### Checkpoint
+- [ ] Agent tracks opponent crops correctly
+- [ ] Agent scales its animal herd to >10 animals in the mid-game
+- [ ] Win rate vs Phase 3 remains 100%
+- [ ] Terminal bank account reaches ,000+ consistently
