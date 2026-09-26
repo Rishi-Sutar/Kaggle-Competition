@@ -314,6 +314,8 @@
 | 6 | 2026-09-21 | Phase 8 ELO Meta-Strategy | 353.1 | Saturated market & animal placement bug discovered |
 | 7 | 2026-09-21 | Phase 9 Coordinated Pipeline | ~$9,500+ | Day 0 blitz, daily re-hires, multi-step animal placement/feed |
 | 8 | 2026-09-23 | Phase 10 Predictive Dynamic Strategy | ~,000+ | Opponent awareness, predictive pricing, dynamic simulator-based strategy selection |
+| 9 | 2026-09-23 | Phase 11 Opponent Sabotage (Predatory Dumping) | ~,900+ (Opponent !) | Hoard target crops and dump one turn before opponent maturity |
+| 10 | 2026-09-26 | Phase 12 EMV Engine | ~,000+ | Tile-by-tile Expected Marginal Value tracking, no rigid strategy |
 
 ---
 
@@ -352,3 +354,9 @@ Record important design decisions and why they were made.
 - [ ] Upgraded simulator.py (strategy simulation with prediction)
 - [ ] Upgraded main.py (daily strategy re-evaluation and dynamic scaling)
 - [ ] Verified performance improvement (Score 2000+ target)
+
+
+### Phase 11 — Opponent Sabotage
+- [ ] Appended Phase 11 to IMPLEMENTATION_PLAN.md
+- [ ] Upgraded market_model.py (opponent maturity tracking & predatory dumping)
+- [ ] Verified performance and opponent score drop

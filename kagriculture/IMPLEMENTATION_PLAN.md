@@ -1712,3 +1712,21 @@ Transition the agent from static heuristics (Phase 9) to a fully dynamic, simula
 - [ ] Agent scales its animal herd to >10 animals in the mid-game
 - [ ] Win rate vs Phase 3 remains 100%
 - [ ] Terminal bank account reaches ,000+ consistently
+
+
+---
+
+# PHASE 11 — Opponent Sabotage (Predatory Market Dumping)
+
+## Goal
+Transition from purely maximizing profit to actively destroying the opponent's economy by crashing the market price of their crops right before they harvest.
+
+### Steps
+1. **Enhance market_model.py**: Implement tracking of opponent crop maturity times.
+2. **Predatory Dumping**: Hoard high-value goods (like Melons/Carrots) in the shed (up to a safe limit, e.g. 80 items).
+3. **Crash the Market**: Dump the hoarded goods exactly one turn before the opponent harvests, securing the high price for us and leaving them with the price floor.
+
+### Checkpoint
+- [ ] Agent hoards crops when opponent is growing the same crop
+- [ ] Agent sells crops immediately before opponent harvest
+- [ ] Opponent terminal money drops significantly compared to Phase 10
