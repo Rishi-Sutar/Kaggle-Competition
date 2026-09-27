@@ -1,6 +1,6 @@
 """
-Expected Marginal Value (EMV) Engine
-Dynamically calculates the ROI of every possible investment per tile.
+Expected Marginal Value (EMV) Engine — Phase 13: Internal Supply Chain & Land Expansion
+Dynamically calculates the absolute profit of every possible investment per tile.
 """
 from typing import Dict, List, Tuple
 from crop_model import CROP_TYPES
@@ -12,7 +12,7 @@ from world_state import WorldState
 # 5 workers * 24 actions = 120 actions for $12. So $0.10 per action.
 # Let's conservatively say $1 per daily maintenance action.
 LABOR_COST_PER_DAY = 1.0
-WHEAT_FEED_COST = 25.0 # Assuming market price for wheat
+WHEAT_FEED_COST = 2.5 # Internal supply chain cost (10 seed / 4 yield)
 
 def get_operational_buffer(world: WorldState, private_state: dict) -> float:
     """
@@ -104,28 +104,61 @@ def calculate_animal_emv(animal_name: str, current_day: int, tracker: MarketTrac
     return profit
 
 
+def calculate_land_emv(current_day: int, tracker: MarketTracker) -> float:
+    """
+    Calculates the EMV of buying one new quadrant (25 tiles at $1000 cost).
+    The logic: each new tile can be filled with the best available investment.
+    We approximate by multiplying the top-ranked animal EMV by 25 tiles,
+    discounted to account for the time it takes to build structures and place animals.
+    If days left are too few to recoup the $1000, returns negative.
+    """
+    LAND_COST = 1000
+    QUADRANT_TILES = 25
+    days_left = 30 - current_day
+
+    # Not worth buying land if we can't populate and recoup in time
+    if days_left < 10:
+        return -9999.0
+
+    # What's the best per-tile EMV available right now?
+    # We use Cow EMV as a proxy since cows are the primary animal we'd fill tiles with
+    best_cow_emv = calculate_animal_emv("COW", current_day, tracker)
+    best_sheep_emv = calculate_animal_emv("SHEEP", current_day, tracker)
+    best_animal_emv = max(best_cow_emv, best_sheep_emv, 0)
+
+    # Assume we can profitably fill ~60% of the quadrant (structure build time + movement)
+    effective_tiles = QUADRANT_TILES * 0.60
+    projected_profit = best_animal_emv * effective_tiles
+
+    # Deduct land cost
+    return projected_profit - LAND_COST
+
+
 def get_best_investments(world: WorldState, tracker: MarketTracker, private_state: dict) -> List[Tuple[str, str, float]]:
     """
-    Evaluates all options and returns a list of (Type, Name, ROI) sorted by ROI descending.
-    Type is 'CROP' or 'ANIMAL'.
-    ROI is expected_profit / investment_cost.
+    Evaluates all options and returns a list of (Type, Name, EMV) sorted by absolute EMV descending.
+    Type is 'CROP', 'ANIMAL', or 'LAND'.
     """
     options = []
+
+    # Evaluate Land Expansion first (it unlocks all future tile options)
+    if len(world.my_farm.unlocked_quadrants) < 4:
+        land_emv = calculate_land_emv(world.day, tracker)
+        if land_emv > 0:
+            options.append(("LAND", "QUADRANT", land_emv))
     
     # Evaluate Crops
     for crop_name, info in CROP_TYPES.items():
         emv = calculate_crop_emv(crop_name, world.day, tracker)
         if emv > 0:
-            roi = emv / info.seed_cost
-            options.append(("CROP", crop_name, roi))
+            options.append(("CROP", crop_name, emv))
             
     # Evaluate Animals
     for animal_name, info in ANIMAL_TYPES.items():
         emv = calculate_animal_emv(animal_name, world.day, tracker)
         if emv > 0:
-            roi = emv / info.cost
-            options.append(("ANIMAL", animal_name, roi))
+            options.append(("ANIMAL", animal_name, emv))
             
-    # Sort by ROI descending
+    # Sort by Absolute EMV descending
     options.sort(key=lambda x: x[2], reverse=True)
     return options

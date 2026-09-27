@@ -316,6 +316,7 @@
 | 8 | 2026-09-23 | Phase 10 Predictive Dynamic Strategy | ~,000+ | Opponent awareness, predictive pricing, dynamic simulator-based strategy selection |
 | 9 | 2026-09-23 | Phase 11 Opponent Sabotage (Predatory Dumping) | ~,900+ (Opponent !) | Hoard target crops and dump one turn before opponent maturity |
 | 10 | 2026-09-26 | Phase 12 EMV Engine | ~,000+ | Tile-by-tile Expected Marginal Value tracking, no rigid strategy |
+| 11 | 2026-09-27 | Phase 13 Supply Chain | ~,400+ | Internal WHEAT cost = .50, absolute EMV sorting, hyper worker scaling |
 
 ---
 

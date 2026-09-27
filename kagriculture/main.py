@@ -38,7 +38,15 @@ def agent(obs: Dict[str, Any]) -> Dict[str, Any]:
     if world.hour == 0:
         # 1a. Hire Workers for today
         if not is_endgame:
-            num_hires = 5 if my_farm.money >= 50 else (3 if my_farm.money >= 20 else 1)
+            if my_farm.money >= 200:
+                num_hires = 8
+            elif my_farm.money >= 50:
+                num_hires = 5
+            elif my_farm.money >= 20:
+                num_hires = 3
+            else:
+                num_hires = 1
+            
             for _ in range(num_hires):
                 market_orders.append(ae.hire_order())
                 
@@ -46,17 +54,34 @@ def agent(obs: Dict[str, Any]) -> Dict[str, Any]:
         if not is_endgame:
             investments = get_best_investments(world, tracker, private.shed)
             
+            # Dedicated Wheat Sub-Routine for Animals
+            num_animals = len(my_farm.structure_tiles) + sum(private.shed.get(a, 0) for a in ["GOOSE", "COW", "SHEEP"])
+            current_wheat_plants = sum(1 for t in my_farm.plant_tiles if getattr(t, 'crop', None) == "WHEAT")
+            
+            # 1 wheat plant yields ~4 wheat. Let's ensure at least 1 wheat plant per 2 animals.
+            if current_wheat_plants < (num_animals // 2) + 1 and num_animals > 0:
+                # Force plant wheat by giving it an artificially high EMV at the top of the list
+                investments.insert(0, ("CROP", "WHEAT", 99999.0))
+            
             # Find the best crop from investments to set as our default
             best_crop = next((name for typ, name, roi in investments if typ == "CROP"), "CARROT")
             current_best_crop = best_crop
 
             empty_tiles = len(my_farm.empty_tiles)
             
-            for inv_type, name, roi in investments:
+            for inv_type, name, emv in investments:
                 if projected_money <= op_buffer:
-                    break # Stop if we hit the operational buffer
-                    
-                if inv_type == "ANIMAL":
+                    break
+
+                if inv_type == "LAND":
+                    # Buy land aggressively whenever EMV is positive and we can afford it
+                    if projected_money >= 1000 + op_buffer and len(my_farm.unlocked_quadrants) < 4:
+                        market_orders.append(ae.buy_land_order())
+                        projected_money -= 1000
+                        # After buying land, break so we can re-evaluate with new tile count
+                        break
+
+                elif inv_type == "ANIMAL":
                     cost = ANIMAL_TYPES[name].cost
                     if projected_money >= cost + op_buffer and empty_tiles > 0:
                         market_orders.append(ae.buy_animal_order(name, 1))
@@ -68,17 +93,10 @@ def agent(obs: Dict[str, Any]) -> Dict[str, Any]:
                     seeds_owned = private.seeds.get(name, 0)
                     
                     if seeds_owned < empty_tiles and projected_money >= cost + op_buffer:
-                        # Buy in small batches to save market orders, up to available money above buffer
                         buy_count = min(empty_tiles - seeds_owned, int((projected_money - op_buffer) // cost), 15)
                         if buy_count > 0:
                             market_orders.append(ae.buy_seed_order(name, buy_count))
                             projected_money -= buy_count * cost
-
-            # Expand farm land if running out of space and we have plenty of cash
-            if projected_money >= 1000 + op_buffer and len(my_farm.unlocked_quadrants) < 4:
-                if len(my_farm.empty_tiles) < 5:
-                    market_orders.append(ae.buy_land_order())
-                    projected_money -= 1000
 
     # Count animals to calculate wheat feed reserve
     num_animals = len(my_farm.structure_tiles) + sum(
