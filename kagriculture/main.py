@@ -7,7 +7,7 @@ from task_manager import generate_tasks, execute_worker_task, assign_tasks
 from optimizer import optimize_assignments
 import action_engine as ae
 from market_model import MarketTracker
-from emv_engine import get_best_investments, get_operational_buffer
+from emv_engine import get_best_investments, get_operational_buffer, predict_tomorrows_cashflow
 from animal_model import ANIMAL_TYPES
 from crop_model import CROP_TYPES
 
@@ -54,6 +54,20 @@ def agent(obs: Dict[str, Any]) -> Dict[str, Any]:
         if not is_endgame:
             investments = get_best_investments(world, tracker, private.shed)
             
+            # Identify the natural Top-Tier investment before any overrides
+            top_tier_cost = 0
+            top_emv = 0
+            if investments:
+                top_inv_type, top_inv_name, top_emv = investments[0]
+                if top_inv_type == "LAND":
+                    top_tier_cost = 1000
+                elif top_inv_type == "ANIMAL":
+                    top_tier_cost = ANIMAL_TYPES[top_inv_name].cost
+                elif top_inv_type == "CROP":
+                    top_tier_cost = CROP_TYPES[top_inv_name].seed_cost
+            
+            tomorrows_cashflow = predict_tomorrows_cashflow(world, tracker, private.shed)
+            
             # Dedicated Wheat Sub-Routine for Animals
             num_animals = len(my_farm.structure_tiles) + sum(private.shed.get(a, 0) for a in ["GOOSE", "COW", "SHEEP"])
             current_wheat_plants = sum(1 for t in my_farm.plant_tiles if getattr(t, 'crop', None) == "WHEAT")
@@ -73,13 +87,20 @@ def agent(obs: Dict[str, Any]) -> Dict[str, Any]:
                 if projected_money <= op_buffer:
                     break
 
+                # Phase 16: Tile Reservation (Opportunity Cost)
+                # If this is a lower-tier investment (EMV < top natural EMV) and we can afford the top tier tomorrow
+                if emv < top_emv and projected_money + tomorrows_cashflow >= top_tier_cost + op_buffer:
+                    # Skip it! Save the cash and reserve the tile for the top-tier investment tomorrow.
+                    continue
+
                 if inv_type == "LAND":
                     # Buy land aggressively whenever EMV is positive and we can afford it
                     if projected_money >= 1000 + op_buffer and len(my_farm.unlocked_quadrants) < 4:
                         market_orders.append(ae.buy_land_order())
                         projected_money -= 1000
-                        # After buying land, break so we can re-evaluate with new tile count
-                        break
+                        # After buying land, we have 25 more empty tiles to fill
+                        empty_tiles += 25
+                        continue
 
                 elif inv_type == "ANIMAL":
                     cost = ANIMAL_TYPES[name].cost

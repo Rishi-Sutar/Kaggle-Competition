@@ -2,8 +2,8 @@
 Market Model for Kaggriculture.
 Tracks price history, calculates trends, and provides intelligence on when to sell.
 """
-from typing import Dict, List, Optional
 from crop_model import CROP_TYPES, crop_profitability
+from animal_model import ANIMAL_TYPES
 from world_state import WorldState
 
 class MarketTracker:
@@ -56,35 +56,67 @@ class MarketTracker:
         diff = recent_prices[-1] - recent_prices[0]
         return diff / (actual_window - 1) if actual_window > 1 else 0.0
 
-    def predict_price_at_maturity(self, crop: str) -> int:
+    def predict_price_at_maturity(self, item_name: str) -> int:
         """
-        Predicts the market price of a crop when it reaches maturity.
-        Considers current inventory, autonomous consumption, and opponent's impending harvests.
+        Predicts the market price of an item when a newly bought one reaches maturity.
         """
-        info = CROP_TYPES.get(crop)
-        if not info:
-            return 0
+        # If it's a crop
+        info = CROP_TYPES.get(item_name)
+        if info:
+            base_price = info.base_sell_price
+            days_to_mature = info.first_yield_day
+            yield_est = info.peak_unfertilized_yield
+            opp_harvest_estimate = self.opp_crop_counts.get(item_name, 0) * yield_est
+        else:
+            # Maybe it's an animal product (EGG, MILK, WOOL)
+            # Find the animal that produces this
+            animal_info = next((a for a in ANIMAL_TYPES.values() if a.product == item_name), None)
+            if not animal_info:
+                return 0
+            base_price = animal_info.base_product_price
+            days_to_mature = animal_info.first_yield_day
+            opp_harvest_estimate = 0 # Animals produce steadily, less shock to market
             
-        current_price = self.price_history.get(crop, [info.base_sell_price])[-1]
-        current_inv = self.inventory_history.get(crop, [10000])[-1]
+        current_price = self.price_history.get(item_name, [base_price])[-1]
+        current_inv = self.inventory_history.get(item_name, [10000])[-1]
         
-        # Approximate autonomous consumption (e.g. ~10 per day minimum)
-        days_to_mature = info.first_yield_day
         consumption = days_to_mature * 10 
-        
-        # Add opponent's impending harvest to future inventory
-        # For ongoing crops (tomato/strawberry), they yield multiple times, so the peak unfertilized yield is a good estimate of total supply added
-        opp_harvest_estimate = self.opp_crop_counts.get(crop, 0) * info.peak_unfertilized_yield
         
         projected_inv = current_inv - consumption + opp_harvest_estimate
         
-        # Simple elasticity heuristic
         baseline_inv = 10000
         inv_diff = projected_inv - baseline_inv
         price_modifier = 1.0 - (inv_diff / 10000.0) 
         price_modifier = max(0.1, min(price_modifier, 5.0)) 
         
-        predicted = int(info.base_sell_price * price_modifier)
+        predicted = int(base_price * price_modifier)
+        return max(5, predicted)
+        
+    def predict_price_tomorrow(self, item_name: str, opp_harvests_tomorrow: int = 0) -> int:
+        """
+        Predicts the price exactly for tomorrow, incorporating specific known opponent harvests.
+        """
+        info = CROP_TYPES.get(item_name)
+        base_price = info.base_sell_price if info else 100
+        
+        # If it's an animal product
+        if not info:
+            animal_info = next((a for a in ANIMAL_TYPES.values() if a.product == item_name), None)
+            if animal_info:
+                base_price = animal_info.base_product_price
+                
+        current_inv = self.inventory_history.get(item_name, [10000])[-1]
+        
+        # Tomorrow means 1 day of consumption
+        consumption = 10
+        projected_inv = current_inv - consumption + opp_harvests_tomorrow
+        
+        baseline_inv = 10000
+        inv_diff = projected_inv - baseline_inv
+        price_modifier = 1.0 - (inv_diff / 10000.0) 
+        price_modifier = max(0.1, min(price_modifier, 5.0)) 
+        
+        predicted = int(base_price * price_modifier)
         return max(5, predicted)
 
     def should_sell(self, item: str, amount_held: int, current_price: int, current_day: int, total_shed_items: int, is_endgame: bool = False) -> int:

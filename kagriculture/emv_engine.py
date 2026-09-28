@@ -134,6 +134,60 @@ def calculate_land_emv(current_day: int, tracker: MarketTracker) -> float:
     return projected_profit - LAND_COST
 
 
+def predict_tomorrows_cashflow(world: WorldState, tracker: MarketTracker, private_state: dict) -> float:
+    """
+    Predicts the cash we will receive tomorrow, accounting for opponent market dumps.
+    """
+    tomorrow = world.day + 1
+    if tomorrow >= 30:
+        return 0.0
+
+    opp_harvests_tomorrow = {}
+    for tile in world.opp_farm.plant_tiles:
+        if tile.crop:
+            info = CROP_TYPES[tile.crop]
+            yields_tomorrow = False
+            if info.nature == "ONE-TIME" and tomorrow - tile.planted_day == info.max_yield_day:
+                yields_tomorrow = True
+            elif info.nature == "ONGOING" and tomorrow >= tile.planted_day + info.first_yield_day:
+                interval = 2 if tile.crop == "STRAWBERRY" else 1
+                if (tomorrow - tile.planted_day - info.first_yield_day) % interval == 0:
+                    yields_tomorrow = True
+            if yields_tomorrow:
+                opp_harvests_tomorrow[tile.crop] = opp_harvests_tomorrow.get(tile.crop, 0) + info.peak_unfertilized_yield
+
+    my_harvests_tomorrow = {}
+    for tile in world.my_farm.plant_tiles:
+        if tile.crop:
+            info = CROP_TYPES[tile.crop]
+            yields_tomorrow = False
+            if info.nature == "ONE-TIME" and tomorrow - tile.planted_day == info.max_yield_day:
+                yields_tomorrow = True
+            elif info.nature == "ONGOING" and tomorrow >= tile.planted_day + info.first_yield_day:
+                interval = 2 if tile.crop == "STRAWBERRY" else 1
+                if (tomorrow - tile.planted_day - info.first_yield_day) % interval == 0:
+                    yields_tomorrow = True
+            if yields_tomorrow:
+                amt = 2 if info.nature == "ONE-TIME" else 1
+                my_harvests_tomorrow[tile.crop] = my_harvests_tomorrow.get(tile.crop, 0) + amt
+
+    for tile in world.my_farm.structure_tiles:
+        if tile.animal:
+            info = ANIMAL_TYPES[tile.animal]
+            if tomorrow >= tile.placed_day + info.first_yield_day:
+                if (tomorrow - tile.placed_day - info.first_yield_day) % info.yield_interval == 0:
+                    my_harvests_tomorrow[info.product] = my_harvests_tomorrow.get(info.product, 0) + 1
+
+    expected_revenue = 0.0
+    for item, qty in my_harvests_tomorrow.items():
+        opp_qty = opp_harvests_tomorrow.get(item, 0)
+        predicted_price = tracker.predict_price_tomorrow(item, opp_qty)
+        expected_revenue += (qty * predicted_price)
+        
+    expected_costs = get_operational_buffer(world, private_state)
+    return expected_revenue - expected_costs
+
+
 def get_best_investments(world: WorldState, tracker: MarketTracker, private_state: dict) -> List[Tuple[str, str, float]]:
     """
     Evaluates all options and returns a list of (Type, Name, EMV) sorted by absolute EMV descending.
