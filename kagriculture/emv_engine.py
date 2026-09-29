@@ -2,7 +2,7 @@
 Expected Marginal Value (EMV) Engine — Phase 13: Internal Supply Chain & Land Expansion
 Dynamically calculates the absolute profit of every possible investment per tile.
 """
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Any
 from crop_model import CROP_TYPES
 from animal_model import ANIMAL_TYPES
 from market_model import MarketTracker
@@ -21,7 +21,7 @@ def get_operational_buffer(world: WorldState, private_state: dict) -> float:
     """
     # Count current animals
     num_animals = len(world.my_farm.structure_tiles) + sum(
-        private_state.get(a, 0) for a in ["GOOSE", "COW", "SHEEP"]
+        private_state.get(a, 0) for a in ANIMAL_TYPES
     )
     
     # We need to feed them. Assume wheat cost is ~25.
@@ -33,9 +33,10 @@ def get_operational_buffer(world: WorldState, private_state: dict) -> float:
     return float(feed_cost + worker_cost)
 
 
-def calculate_crop_emv(crop_name: str, current_day: int, tracker: MarketTracker) -> float:
+def calculate_crop_emv(crop_name: str, current_day: int, tracker: MarketTracker, town_model) -> float:
     """
     Calculates the total expected profit of planting a crop today until Day 30.
+    Assumes FERTILIZER is used, which doubles one-time yield rate or doubles ongoing yields.
     """
     info = CROP_TYPES.get(crop_name)
     if not info:
@@ -45,43 +46,40 @@ def calculate_crop_emv(crop_name: str, current_day: int, tracker: MarketTracker)
     if days_left <= info.first_yield_day:
         return -9999.0 # Won't even reach first harvest
         
-    predicted_price = tracker.predict_price_at_maturity(crop_name)
+    predicted_price = tracker.predict_price_at_maturity(crop_name, town_model)
     
     if info.nature == "ONE-TIME":
-        # Check if we can reach peak yield
         if days_left <= info.max_yield_day:
-            # We can harvest, but maybe not at peak. Assume base yield of 1-3.
-            # We'll conservatively say it's not worth it if it doesn't reach peak.
-            if days_left <= info.first_yield_day:
-                return -9999.0
+            if days_left <= info.first_yield_day: return -9999.0
             yield_amount = 1
         else:
-            yield_amount = info.peak_unfertilized_yield
+            # Assume fertilizer is used -> yields hit absolute max cap
+            yield_amount = info.peak_fertilized_yield
             
         revenue = predicted_price * yield_amount
-        labor_cost = LABOR_COST_PER_DAY * info.max_yield_day
-        profit = revenue - info.seed_cost - labor_cost
+        revenue = predicted_price * yield_amount
+        profit = revenue - info.seed_cost
         
     else: # ONGOING (Tomato, Strawberry)
-        # Calculate how many yields we can get before Day 30
         yields_possible = 0
         day_pointer = info.first_yield_day
-        interval = 2 if crop_name == "STRAWBERRY" else 1 # Strawberry every other day, Tomato every day
+        interval = 2 if crop_name == "STRAWBERRY" else 1
         
         while day_pointer < days_left and yields_possible < info.peak_unfertilized_yield:
             yields_possible += 1
             day_pointer += interval
             
-        revenue = predicted_price * yields_possible
-        labor_cost = LABOR_COST_PER_DAY * day_pointer
-        profit = revenue - info.seed_cost - labor_cost
+        # Fertilizer DOUBLES ongoing yields!
+        revenue = predicted_price * (yields_possible * 2)
+        profit = revenue - info.seed_cost
         
     return profit
 
 
-def calculate_animal_emv(animal_name: str, current_day: int, tracker: MarketTracker) -> float:
+def calculate_animal_emv(animal_name: str, current_day: int, tracker: MarketTracker, town_model) -> float:
     """
     Calculates the total expected profit of buying an animal today until Day 30.
+    Assumes CARE is applied daily, which banks +1 yield per day.
     """
     info = ANIMAL_TYPES.get(animal_name)
     if not info:
@@ -91,20 +89,24 @@ def calculate_animal_emv(animal_name: str, current_day: int, tracker: MarketTrac
     if days_left <= info.first_yield_day:
         return -9999.0 # Won't even reach first yield
         
-    predicted_price = tracker.predict_price_at_maturity(info.product)
+    predicted_price = tracker.predict_price_at_maturity(info.product, town_model)
     
     # Calculate total yields before day 30
-    yields_possible = max(0, (days_left - info.first_yield_day) // info.yield_interval + 1)
-    revenue = predicted_price * yields_possible
+    yield_ticks = max(0, (days_left - info.first_yield_day) // info.yield_interval + 1)
+    
+    # With daily CARE, the animal produces (1 base + yield_interval banked days) per tick
+    # Example: Cow (interval 2) produces 1 base + 2 banked = 3 milk per tick
+    yield_per_tick = 1 + info.yield_interval
+    total_products = yield_ticks * yield_per_tick
+    
+    revenue = predicted_price * total_products
     
     feed_cost = WHEAT_FEED_COST * days_left
-    labor_cost = LABOR_COST_PER_DAY * days_left
-    
-    profit = revenue - info.cost - feed_cost - labor_cost
+    profit = revenue - info.cost - feed_cost
     return profit
 
 
-def calculate_land_emv(current_day: int, tracker: MarketTracker) -> float:
+def calculate_land_emv(current_day: int, tracker: MarketTracker, town_model) -> float:
     """
     Calculates the EMV of buying one new quadrant (25 tiles at $1000 cost).
     The logic: each new tile can be filled with the best available investment.
@@ -121,10 +123,12 @@ def calculate_land_emv(current_day: int, tracker: MarketTracker) -> float:
         return -9999.0
 
     # What's the best per-tile EMV available right now?
-    # We use Cow EMV as a proxy since cows are the primary animal we'd fill tiles with
-    best_cow_emv = calculate_animal_emv("COW", current_day, tracker)
-    best_sheep_emv = calculate_animal_emv("SHEEP", current_day, tracker)
-    best_animal_emv = max(best_cow_emv, best_sheep_emv, 0)
+    # We evaluate all animals to find the most profitable one to fill the new tiles
+    best_animal_emv = 0.0
+    for animal_name in ANIMAL_TYPES:
+        emv = calculate_animal_emv(animal_name, current_day, tracker, town_model)
+        if emv > best_animal_emv:
+            best_animal_emv = emv
 
     # Assume we can profitably fill ~60% of the quadrant (structure build time + movement)
     effective_tiles = QUADRANT_TILES * 0.60
@@ -134,85 +138,60 @@ def calculate_land_emv(current_day: int, tracker: MarketTracker) -> float:
     return projected_profit - LAND_COST
 
 
-def predict_tomorrows_cashflow(world: WorldState, tracker: MarketTracker, private_state: dict) -> float:
+def get_target_portfolio(world: WorldState, tracker: MarketTracker, private: Any, town_model) -> List[Tuple[str, str, float]]:
     """
-    Predicts the cash we will receive tomorrow, accounting for opponent market dumps.
-    """
-    tomorrow = world.day + 1
-    if tomorrow >= 30:
-        return 0.0
-
-    opp_harvests_tomorrow = {}
-    for tile in world.opp_farm.plant_tiles:
-        if tile.crop:
-            info = CROP_TYPES[tile.crop]
-            yields_tomorrow = False
-            if info.nature == "ONE-TIME" and tomorrow - tile.planted_day == info.max_yield_day:
-                yields_tomorrow = True
-            elif info.nature == "ONGOING" and tomorrow >= tile.planted_day + info.first_yield_day:
-                interval = 2 if tile.crop == "STRAWBERRY" else 1
-                if (tomorrow - tile.planted_day - info.first_yield_day) % interval == 0:
-                    yields_tomorrow = True
-            if yields_tomorrow:
-                opp_harvests_tomorrow[tile.crop] = opp_harvests_tomorrow.get(tile.crop, 0) + info.peak_unfertilized_yield
-
-    my_harvests_tomorrow = {}
-    for tile in world.my_farm.plant_tiles:
-        if tile.crop:
-            info = CROP_TYPES[tile.crop]
-            yields_tomorrow = False
-            if info.nature == "ONE-TIME" and tomorrow - tile.planted_day == info.max_yield_day:
-                yields_tomorrow = True
-            elif info.nature == "ONGOING" and tomorrow >= tile.planted_day + info.first_yield_day:
-                interval = 2 if tile.crop == "STRAWBERRY" else 1
-                if (tomorrow - tile.planted_day - info.first_yield_day) % interval == 0:
-                    yields_tomorrow = True
-            if yields_tomorrow:
-                amt = 2 if info.nature == "ONE-TIME" else 1
-                my_harvests_tomorrow[tile.crop] = my_harvests_tomorrow.get(tile.crop, 0) + amt
-
-    for tile in world.my_farm.structure_tiles:
-        if tile.animal:
-            info = ANIMAL_TYPES[tile.animal]
-            if tomorrow >= tile.placed_day + info.first_yield_day:
-                if (tomorrow - tile.placed_day - info.first_yield_day) % info.yield_interval == 0:
-                    my_harvests_tomorrow[info.product] = my_harvests_tomorrow.get(info.product, 0) + 1
-
-    expected_revenue = 0.0
-    for item, qty in my_harvests_tomorrow.items():
-        opp_qty = opp_harvests_tomorrow.get(item, 0)
-        predicted_price = tracker.predict_price_tomorrow(item, opp_qty)
-        expected_revenue += (qty * predicted_price)
-        
-    expected_costs = get_operational_buffer(world, private_state)
-    return expected_revenue - expected_costs
-
-
-def get_best_investments(world: WorldState, tracker: MarketTracker, private_state: dict) -> List[Tuple[str, str, float]]:
-    """
-    Evaluates all options and returns a list of (Type, Name, EMV) sorted by absolute EMV descending.
-    Type is 'CROP', 'ANIMAL', or 'LAND'.
+    Calculates the absolute best items to buy RIGHT NOW.
+    Accounts for market glut by artificially lowering the EMV of items we already have
+    or items that are highly sensitive to market crashes.
+    Returns a sorted list of (Type, Name, Adjusted_EMV).
     """
     options = []
-
-    # Evaluate Land Expansion first (it unlocks all future tile options)
+    days_left = 30 - world.day
+    
+    # 1. Land Expansion
     if len(world.my_farm.unlocked_quadrants) < 4:
-        land_emv = calculate_land_emv(world.day, tracker)
+        land_emv = calculate_land_emv(world.day, tracker, town_model)
         if land_emv > 0:
             options.append(("LAND", "QUADRANT", land_emv))
-    
-    # Evaluate Crops
+            
+    # Calculate our current exposure to each product
+    current_exposure = {}
+    for tile in world.my_farm.plant_tiles:
+        if tile.crop:
+            current_exposure[tile.crop] = current_exposure.get(tile.crop, 0) + 1
+    for tile in world.my_farm.structure_tiles:
+        if tile.animal:
+            prod = ANIMAL_TYPES[tile.animal].product
+            current_exposure[prod] = current_exposure.get(prod, 0) + 1
+            
+    # 2. Crops
     for crop_name, info in CROP_TYPES.items():
-        emv = calculate_crop_emv(crop_name, world.day, tracker)
-        if emv > 0:
-            options.append(("CROP", crop_name, emv))
+        base_emv = calculate_crop_emv(crop_name, world.day, tracker, town_model)
+        if base_emv > 0:
+            # Glut penalty: Reduce EMV based on how many we already have vs market tolerance (T)
+            # Highly sensitive crops (Strawberry T=100) lose EMV much faster than Wheat (T=400)
+            T_VALUES = {"WHEAT": 250, "CARROT": 150, "MELON": 250, "STRAWBERRY": 100, "TOMATO": 150, "EGG": 250, "MILK": 100, "WOOL": 150}
+            exposure = current_exposure.get(crop_name, 0)
+            glut_penalty = 1.0 - (exposure / max(1, T_VALUES.get(crop_name, 100)))
+            adjusted_emv = base_emv * max(0.1, glut_penalty)
             
-    # Evaluate Animals
+            # Artificial boost for WHEAT if we have animals
+            if crop_name == "WHEAT":
+                num_animals = len(world.my_farm.structure_tiles) + sum(private.shed.get(a, 0) for a in ANIMAL_TYPES)
+                if exposure < (num_animals // 2) + 1 and num_animals > 0:
+                    adjusted_emv = 99999.0
+                    
+            options.append(("CROP", crop_name, adjusted_emv))
+            
+    # 3. Animals
     for animal_name, info in ANIMAL_TYPES.items():
-        emv = calculate_animal_emv(animal_name, world.day, tracker)
-        if emv > 0:
-            options.append(("ANIMAL", animal_name, emv))
+        base_emv = calculate_animal_emv(animal_name, world.day, tracker, town_model)
+        if base_emv > 0:
+            T_VALUES = {"WHEAT": 250, "CARROT": 150, "MELON": 250, "STRAWBERRY": 100, "TOMATO": 150, "EGG": 250, "MILK": 100, "WOOL": 150}
+            exposure = current_exposure.get(info.product, 0)
+            glut_penalty = 1.0 - (exposure / max(1, T_VALUES.get(info.product, 100)))
+            adjusted_emv = base_emv * max(0.1, glut_penalty)
+            options.append(("ANIMAL", animal_name, adjusted_emv))
             
-    # Sort by Absolute EMV descending
     options.sort(key=lambda x: x[2], reverse=True)
     return options

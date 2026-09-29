@@ -13,16 +13,18 @@ SHED_POS = (4, 4)
 PRODUCE_ITEMS = {"MILK", "WOOL", "EGG", "MELON", "CARROT", "TOMATO", "STRAWBERRY", "FERTILIZER"}
 
 TASK_PRIORITIES = {
-    "FEED": 12,           # Crucial: unfed animals escape after 2 days
-    "WATER": 11,          # Prevent crop decay & maximize yield
-    "HARVEST_ANIMAL": 10, # Collect high-value animal products
-    "HARVEST": 10,        # Harvest mature crops before decay
-    "DROP_OFF": 9,        # Deposit harvested goods into shed for market sale
-    "PLACE_ANIMAL": 8,    # Place purchased animals in structures
-    "CARE": 7,            # Care for animals to multiply payout
-    "BUILD_STRUCTURE": 6, # Build pastures and coops for unplaced animals
-    "PLANT": 5,           # Keep tiles productive
-    "DIG": 2,             # Clear weeds
+    "FEED": 15,               # CRITICAL: unfed animals escape after 2 days — always first
+    "CARE": 14,               # Phase 17: Care for animals to compound yield bonus (highest after feed)
+    "WATER": 13,              # CRITICAL: unwatered crops weed after 2 days — second
+    "COLLECT_FERTILIZER": 12, # Free fertilizer from animals — do after survival needs met
+    "HARVEST_ANIMAL": 11,     # Collect high-value animal products before cap
+    "HARVEST": 11,            # Harvest mature crops before decay
+    "FERTILIZE": 9,           # Apply fertilizer to crops
+    "DROP_OFF": 8,            # Deposit harvested goods into shed for market sale
+    "PLACE_ANIMAL": 7,        # Place purchased animals in structures
+    "BUILD_STRUCTURE": 6,     # Build pastures and coops for unplaced animals
+    "PLANT": 5,               # Keep tiles productive
+    "DIG": 2,                 # Clear weeds
     "IDLE": 0,
 }
 
@@ -41,7 +43,7 @@ class Task:
 def effective_distance(worker: WorkerState, task: Task) -> int:
     """Computes realistic travel distance considering required shed trips."""
     if task.task_type == "PLACE_ANIMAL":
-        animal = task.crop or "SHEEP"
+        animal = task.crop
         if worker.inventory.get(animal, 0) > 0:
             return manhattan_distance(worker.pos, task.target_pos)
         return manhattan_distance(worker.pos, SHED_POS) + manhattan_distance(SHED_POS, task.target_pos)
@@ -72,7 +74,16 @@ def generate_tasks(world: WorldState, default_crop: str = "MELON") -> List[Task]
                 worker_id=worker.worker_id,
             ))
 
-    # 2. FEED & CARE tasks for animals
+    # 2. COLLECT_FERTILIZER — free from every animal daily
+    for tile in farm.structure_tiles:
+        if tile.animal is not None and tile.fertilizer_available:
+            tasks.append(Task(
+                task_type="COLLECT_FERTILIZER",
+                target_pos=tile.pos,
+                priority=TASK_PRIORITIES["COLLECT_FERTILIZER"],
+            ))
+
+    # 3. FEED, CARE tasks for animals
     total_wheat = private.shed.get("WHEAT", 0) + sum(w.inventory.get("WHEAT", 0) for w in farm.all_workers)
     for tile in farm.structure_tiles:
         if tile.ready_to_harvest:
@@ -95,7 +106,7 @@ def generate_tasks(world: WorldState, default_crop: str = "MELON") -> List[Task]
                 priority=TASK_PRIORITIES["CARE"],
             ))
 
-    # 3. WATER tasks for all unwatered crops
+    # 4. WATER tasks for all unwatered crops
     for tile in farm.unwatered_crop_tiles:
         tasks.append(Task(
             task_type="WATER",
@@ -103,7 +114,7 @@ def generate_tasks(world: WorldState, default_crop: str = "MELON") -> List[Task]
             priority=TASK_PRIORITIES["WATER"],
         ))
 
-    # 4. HARVEST tasks for mature crops
+    # 5. HARVEST tasks for mature crops
     for tile in farm.ready_to_harvest_tiles:
         tasks.append(Task(
             task_type="HARVEST",
@@ -112,9 +123,31 @@ def generate_tasks(world: WorldState, default_crop: str = "MELON") -> List[Task]
             crop=tile.crop,
         ))
 
-    # 5. Unplaced animals -> PLACE_ANIMAL and BUILD_STRUCTURE
+    # 6. Unplaced animals -> PLACE_ANIMAL and BUILD_STRUCTURE
+
+    # 6a. FERTILIZE tasks — apply fertilizer from shed to highest-value crop tiles
+    fertilizer_in_shed = private.shed.get("FERTILIZER", 0) + sum(
+        w.inventory.get("FERTILIZER", 0) for w in farm.all_workers
+    )
+    if fertilizer_in_shed > 0:
+        # Prioritize ongoing crops (strawberry, tomato) and melon for fertilization
+        FERTILIZE_PRIORITY = ["STRAWBERRY", "MELON", "TOMATO", "CARROT", "WHEAT"]
+        fertilizable = [
+            t for t in farm.plant_tiles
+            if t.crop in FERTILIZE_PRIORITY and t.fertilized_until_day == -1
+        ]
+        fertilizable.sort(key=lambda t: FERTILIZE_PRIORITY.index(t.crop))
+        for tile in fertilizable[:fertilizer_in_shed]:
+            tasks.append(Task(
+                task_type="FERTILIZE",
+                target_pos=tile.pos,
+                priority=TASK_PRIORITIES["FERTILIZE"],
+            ))
+
+    # 6b. Unplaced animals
     unplaced_animals: List[str] = []
-    for animal in ["COW", "SHEEP", "GOOSE"]:
+    from animal_model import ANIMAL_TYPES
+    for animal in ANIMAL_TYPES:
         count = private.shed.get(animal, 0) + sum(w.inventory.get(animal, 0) for w in farm.all_workers)
         for _ in range(count):
             unplaced_animals.append(animal)
@@ -126,10 +159,7 @@ def generate_tasks(world: WorldState, default_crop: str = "MELON") -> List[Task]
             break
         chosen_animal = None
         for a in available_animals:
-            if tile.structure_kind == "COOP" and a == "GOOSE":
-                chosen_animal = a
-                break
-            elif tile.structure_kind == "PASTURE" and a in ("COW", "SHEEP"):
+            if tile.structure_kind == ANIMAL_TYPES[a].structure:
                 chosen_animal = a
                 break
         if chosen_animal:
@@ -142,39 +172,38 @@ def generate_tasks(world: WorldState, default_crop: str = "MELON") -> List[Task]
             ))
 
     # Structure building if we have unplaced animals exceeding empty structures
-    empty_coops = sum(1 for t in farm.empty_structures if t.structure_kind == "COOP")
-    empty_pastures = sum(1 for t in farm.empty_structures if t.structure_kind == "PASTURE")
-    coops_needed = max(0, unplaced_animals.count("GOOSE") - empty_coops)
-    pastures_needed = max(0, sum(1 for a in unplaced_animals if a in ("COW", "SHEEP")) - empty_pastures)
-
-    if coops_needed > 0 or pastures_needed > 0:
+    structs_needed = {}
+    for a in unplaced_animals:
+        s = ANIMAL_TYPES[a].structure
+        structs_needed[s] = structs_needed.get(s, 0) + 1
+        
+    empty_structs = {}
+    for t in farm.empty_structures:
+        empty_structs[t.structure_kind] = empty_structs.get(t.structure_kind, 0) + 1
+        
+    for s_needed in structs_needed:
+        missing = max(0, structs_needed[s_needed] - empty_structs.get(s_needed, 0))
+        structs_needed[s_needed] = missing
+        
+    if sum(structs_needed.values()) > 0:
         # Build structures at empty tiles furthest from shed (leave center for crops)
         sorted_empty_rev = sorted(
             farm.empty_tiles,
             key=lambda t: manhattan_distance(t.pos, SHED_POS),
             reverse=True,
         )
-        for tile in sorted_empty_rev:
-            if pastures_needed > 0:
+        for s_needed, count in structs_needed.items():
+            for _ in range(count):
+                if not sorted_empty_rev: break
+                tile = sorted_empty_rev.pop()
                 tasks.append(Task(
                     task_type="BUILD_STRUCTURE",
                     target_pos=tile.pos,
                     priority=TASK_PRIORITIES["BUILD_STRUCTURE"],
-                    crop="PASTURE",
+                    crop=s_needed,
                 ))
-                pastures_needed -= 1
-            elif coops_needed > 0:
-                tasks.append(Task(
-                    task_type="BUILD_STRUCTURE",
-                    target_pos=tile.pos,
-                    priority=TASK_PRIORITIES["BUILD_STRUCTURE"],
-                    crop="COOP",
-                ))
-                coops_needed -= 1
-            else:
-                break
 
-    # 6. PLANT tasks for empty tiles if we have seeds
+    # 7. PLANT tasks for empty tiles if we have seeds
     seeds_available = dict(private.seeds)
     # Check default crop first, then any other crop seeds
     crop_to_plant = default_crop if seeds_available.get(default_crop, 0) > 0 else None
@@ -199,7 +228,7 @@ def generate_tasks(world: WorldState, default_crop: str = "MELON") -> List[Task]
                 crop=crop_to_plant,
             ))
 
-    # 7. DIG weeds
+    # 8. DIG weeds
     for tile in farm.weed_tiles:
         tasks.append(Task(
             task_type="DIG",
@@ -321,6 +350,29 @@ def execute_worker_task(worker: WorkerState, task: Optional[Task], world: WorldS
                 shed_wheat = world.private.shed.get("WHEAT", 0)
                 qty = min(3, max(1, shed_wheat))
                 return ae.pickup_action("WHEAT", qty)
+            mv = next_move(worker.pos, SHED_POS)
+            return ae.move_action(mv) if mv else ae.pass_worker_action()
+
+    # Task: COLLECT_FERTILIZER
+    if task.task_type == "COLLECT_FERTILIZER":
+        if worker.pos == task.target_pos:
+            return ae.collect_fertilizer_action()
+        mv = next_move(worker.pos, task.target_pos)
+        return ae.move_action(mv) if mv else ae.pass_worker_action()
+
+    # Task: FERTILIZE
+    if task.task_type == "FERTILIZE":
+        # Need fertilizer in hand first
+        if worker.inventory.get("FERTILIZER", 0) > 0:
+            if worker.pos == task.target_pos:
+                return ae.fertilize_action()
+            mv = next_move(worker.pos, task.target_pos)
+            return ae.move_action(mv) if mv else ae.pass_worker_action()
+        else:
+            if worker.pos == SHED_POS:
+                shed_fert = world.private.shed.get("FERTILIZER", 0)
+                qty = min(3, max(1, shed_fert))
+                return ae.pickup_action("FERTILIZER", qty)
             mv = next_move(worker.pos, SHED_POS)
             return ae.move_action(mv) if mv else ae.pass_worker_action()
 

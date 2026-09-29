@@ -30,8 +30,8 @@ CROP_TYPES: Dict[str, CropInfo] = {
         base_sell_price=25,
         first_yield_day=2,
         max_yield_day=4,
-        peak_unfertilized_yield=4,
-        peak_fertilized_yield=6
+        peak_unfertilized_yield=3,  # Window = days 2, 3, 4 (3 days * 1)
+        peak_fertilized_yield=6     # 3 days * 2 = 6
     ),
     "CARROT": CropInfo(
         name="CARROT",
@@ -40,8 +40,8 @@ CROP_TYPES: Dict[str, CropInfo] = {
         base_sell_price=35,
         first_yield_day=2,
         max_yield_day=3,
-        peak_unfertilized_yield=3,
-        peak_fertilized_yield=4
+        peak_unfertilized_yield=2,  # Window = days 2, 3 (2 days * 1)
+        peak_fertilized_yield=4     # 2 days * 2 = 4
     ),
     "TOMATO": CropInfo(
         name="TOMATO",
@@ -50,8 +50,8 @@ CROP_TYPES: Dict[str, CropInfo] = {
         base_sell_price=60,
         first_yield_day=8,
         max_yield_day=11,
-        peak_unfertilized_yield=4,  # Cap over multiple days
-        peak_fertilized_yield=4     # Same cap
+        peak_unfertilized_yield=4,  # Max production occurrences
+        peak_fertilized_yield=8     # 4 occurrences * 2 units each
     ),
     "STRAWBERRY": CropInfo(
         name="STRAWBERRY",
@@ -60,8 +60,8 @@ CROP_TYPES: Dict[str, CropInfo] = {
         base_sell_price=120,
         first_yield_day=10,
         max_yield_day=16,
-        peak_unfertilized_yield=4,  # Cap over multiple days
-        peak_fertilized_yield=4     # Same cap
+        peak_unfertilized_yield=4,  # Max production occurrences
+        peak_fertilized_yield=8     # 4 occurrences * 2 units each
     ),
     "MELON": CropInfo(
         name="MELON",

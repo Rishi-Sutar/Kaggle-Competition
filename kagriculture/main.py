@@ -7,11 +7,13 @@ from task_manager import generate_tasks, execute_worker_task, assign_tasks
 from optimizer import optimize_assignments
 import action_engine as ae
 from market_model import MarketTracker
-from emv_engine import get_best_investments, get_operational_buffer, predict_tomorrows_cashflow
+from town_model import TownModel
+from emv_engine import get_target_portfolio, get_operational_buffer
 from animal_model import ANIMAL_TYPES
 from crop_model import CROP_TYPES
 
 tracker = MarketTracker()
+town_tracker = TownModel()
 
 # We cache the best default crop to pass to the task manager
 current_best_crop = "CARROT"
@@ -25,8 +27,9 @@ def agent(obs: Dict[str, Any]) -> Dict[str, Any]:
     market = world.market
 
     tracker.update(world)
+    town_tracker.update(world)
     market_orders: List[List[Any]] = []
-    is_endgame = world.day >= 25
+    is_endgame = world.day >= 27
 
     # Calculate operational buffer for tomorrow
     op_buffer = get_operational_buffer(world, private.shed)
@@ -36,85 +39,104 @@ def agent(obs: Dict[str, Any]) -> Dict[str, Any]:
     # 1. EMV ENGINE & PURCHASES (Hour 0)
     # ==========================================
     if world.hour == 0:
-        # 1a. Hire Workers for today
         if not is_endgame:
-            if my_farm.money >= 200:
-                num_hires = 8
-            elif my_farm.money >= 50:
-                num_hires = 5
-            elif my_farm.money >= 20:
-                num_hires = 3
-            else:
-                num_hires = 1
+            # Calculate precise steps required for today's tasks, prioritized by survival
+            import math
+            from task_manager import TASK_PRIORITIES, SHED_POS
+            from pathfinding import manhattan_distance
             
-            for _ in range(num_hires):
+            proxy_tasks = [] # List of (priority, exact_steps)
+            
+            # Animals
+            for tile in my_farm.structure_tiles:
+                if tile.animal:
+                    dist = manhattan_distance(tile.pos, SHED_POS)
+                    proxy_tasks.append((TASK_PRIORITIES["FEED"], dist + 2))
+                    proxy_tasks.append((TASK_PRIORITIES["CARE"], dist + 1))
+                    if tile.fertilizer_available:
+                        proxy_tasks.append((TASK_PRIORITIES["COLLECT_FERTILIZER"], dist + 2))
+                    if tile.yield_units > 0:
+                        proxy_tasks.append((TASK_PRIORITIES["HARVEST_ANIMAL"], dist + 2))
+                        
+            # Crops
+            for tile in my_farm.plant_tiles:
+                if tile.crop:
+                    dist_to_shed = manhattan_distance(tile.pos, SHED_POS)
+                    
+                    if not tile.watered_today:
+                        proxy_tasks.append((TASK_PRIORITIES["WATER"], dist_to_shed + 1)) # No well trip needed, just walk and water
+                    if tile.yield_units > 0:
+                        proxy_tasks.append((TASK_PRIORITIES["HARVEST"], dist_to_shed + 2))
+                        
+            # Empty Tiles (assume they will be planted)
+            for tile in my_farm.empty_tiles:
+                dist = manhattan_distance(tile.pos, SHED_POS)
+                proxy_tasks.append((TASK_PRIORITIES["PLANT"], dist + 2))
+                
+            # Sort tasks by Priority (Highest first)
+            proxy_tasks.sort(key=lambda x: x[0], reverse=True)
+            
+            # Determine exactly how many workers we need, respecting priority and budget
+            from animal_model import ANIMAL_TYPES
+            num_animals = len(my_farm.structure_tiles) + sum(private.shed.get(a, 0) for a in ANIMAL_TYPES)
+            affordable_budget = my_farm.money - (num_animals * 5) # Feed buffer
+            
+            accumulated_steps = 0
+            ideal_workers_total = 1 # Farmer is free
+            fib = [1, 1, 2, 3, 5, 8, 13, 21, 34]
+            
+            for priority, steps in proxy_tasks:
+                accumulated_steps += steps
+                required_total = math.ceil(accumulated_steps / 24.0)
+                
+                if required_total > ideal_workers_total:
+                    hands_needed = required_total - 1
+                    if hands_needed > 8: 
+                        break # Farm capacity maxed out
+                    
+                    wage_cost = sum(fib[:hands_needed])
+                    if wage_cost <= affordable_budget:
+                        ideal_workers_total = required_total
+                    else:
+                        break # Cannot afford to staff lower priority tasks, stop hiring
+                        
+            # Phase 17: Cap at 4 hands so we reserve at least 6 slots for market investments (limit is 10)
+            num_hands = min(ideal_workers_total - 1, 4)
+            
+            # Hire the calculated number of workers
+            for _ in range(num_hands):
                 market_orders.append(ae.hire_order())
                 
-        # 1b. EMV Investment Allocation
-        if not is_endgame:
-            investments = get_best_investments(world, tracker, private.shed)
+            # Get the optimal portfolio given current market glut
+            target_portfolio = get_target_portfolio(world, tracker, private, town_tracker)
             
-            # Identify the natural Top-Tier investment before any overrides
-            top_tier_cost = 0
-            top_emv = 0
-            if investments:
-                top_inv_type, top_inv_name, top_emv = investments[0]
-                if top_inv_type == "LAND":
-                    top_tier_cost = 1000
-                elif top_inv_type == "ANIMAL":
-                    top_tier_cost = ANIMAL_TYPES[top_inv_name].cost
-                elif top_inv_type == "CROP":
-                    top_tier_cost = CROP_TYPES[top_inv_name].seed_cost
-            
-            tomorrows_cashflow = predict_tomorrows_cashflow(world, tracker, private.shed)
-            
-            # Dedicated Wheat Sub-Routine for Animals
-            num_animals = len(my_farm.structure_tiles) + sum(private.shed.get(a, 0) for a in ["GOOSE", "COW", "SHEEP"])
-            current_wheat_plants = sum(1 for t in my_farm.plant_tiles if getattr(t, 'crop', None) == "WHEAT")
-            
-            # 1 wheat plant yields ~4 wheat. Let's ensure at least 1 wheat plant per 2 animals.
-            if current_wheat_plants < (num_animals // 2) + 1 and num_animals > 0:
-                # Force plant wheat by giving it an artificially high EMV at the top of the list
-                investments.insert(0, ("CROP", "WHEAT", 99999.0))
-            
-            # Find the best crop from investments to set as our default
-            best_crop = next((name for typ, name, roi in investments if typ == "CROP"), "CARROT")
+            best_crop = next((name for typ, name, roi in target_portfolio if typ == "CROP" and name != "WHEAT"), "CARROT")
+            global current_best_crop
             current_best_crop = best_crop
-
+            
             empty_tiles = len(my_farm.empty_tiles)
             
-            for inv_type, name, emv in investments:
-                if projected_money <= op_buffer:
-                    break
-
-                # Phase 16: Tile Reservation (Opportunity Cost)
-                # If this is a lower-tier investment (EMV < top natural EMV) and we can afford the top tier tomorrow
-                if emv < top_emv and projected_money + tomorrows_cashflow >= top_tier_cost + op_buffer:
-                    # Skip it! Save the cash and reserve the tile for the top-tier investment tomorrow.
-                    continue
-
-                if inv_type == "LAND":
-                    # Buy land aggressively whenever EMV is positive and we can afford it
-                    if projected_money >= 1000 + op_buffer and len(my_farm.unlocked_quadrants) < 4:
+            # Execute purchases
+            for item_type, name, emv in target_portfolio:
+                if len(market_orders) >= 10: break # Market slot cap
+                if projected_money <= op_buffer: break
+                
+                if item_type == "LAND":
+                    if projected_money >= 1000 + op_buffer:
                         market_orders.append(ae.buy_land_order())
                         projected_money -= 1000
-                        # After buying land, we have 25 more empty tiles to fill
                         empty_tiles += 25
-                        continue
-
-                elif inv_type == "ANIMAL":
+                elif item_type == "ANIMAL":
                     cost = ANIMAL_TYPES[name].cost
                     if projected_money >= cost + op_buffer and empty_tiles > 0:
                         market_orders.append(ae.buy_animal_order(name, 1))
                         projected_money -= cost
                         empty_tiles -= 1
-                        
-                elif inv_type == "CROP":
+                elif item_type == "CROP":
                     cost = CROP_TYPES[name].seed_cost
                     seeds_owned = private.seeds.get(name, 0)
-                    
                     if seeds_owned < empty_tiles and projected_money >= cost + op_buffer:
-                        buy_count = min(empty_tiles - seeds_owned, int((projected_money - op_buffer) // cost), 15)
+                        buy_count = min(empty_tiles - seeds_owned, int((projected_money - op_buffer) // cost), 10 - len(market_orders))
                         if buy_count > 0:
                             market_orders.append(ae.buy_seed_order(name, buy_count))
                             projected_money -= buy_count * cost
@@ -142,14 +164,21 @@ def agent(obs: Dict[str, Any]) -> Dict[str, Any]:
     if world.hour == 23 or is_endgame:
         total_shed_items = sum(private.shed.values())
         
-        for good, count in private.shed.items():
+        # Sort by current price descending so high-value items (MILK, WOOL) sell first
+        sellable_goods = [
+            (good, count, market.price_of(good))
+            for good, count in private.shed.items()
             if count > 0 and good in (
-                "MELON", "WOOL", "MILK", "EGG", "STRAWBERRY", "TOMATO", "CARROT", "FERTILIZER"
-            ):
-                price = market.price_of(good)
-                sell_qty = tracker.should_sell(good, count, price, world.day, total_shed_items, is_endgame=is_endgame)
-                if sell_qty > 0:
-                    market_orders.append(ae.sell_order(good, sell_qty))
+                "MELON", "WOOL", "MILK", "EGG", "STRAWBERRY", "TOMATO",
+                "CARROT", "FERTILIZER"
+            )
+        ]
+        sellable_goods.sort(key=lambda x: x[2], reverse=True)
+        
+        for good, count, price in sellable_goods:
+            sell_qty = tracker.should_sell(good, count, price, world.day, total_shed_items, is_endgame=is_endgame)
+            if sell_qty > 0:
+                market_orders.append(ae.sell_order(good, sell_qty))
 
         # Sell surplus wheat beyond animal feed reserve
         available_wheat = wheat_in_shed if is_endgame else max(0, wheat_in_shed - wheat_reserve)
